@@ -1,0 +1,19 @@
+{
+  "name": "rulegarden",
+  "version": "0.1.0",
+  "description": "A lifecycle system for project-level Codex rules.",
+  "author": {
+    "name": "RuleGarden contributors"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "RuleGarden",
+    "shortDescription": "Learn, apply, and prune project rules.",
+    "longDescription": "Turns repeated Codex corrections into task-aware, reversible project rules.",
+    "developerName": "RuleGarden contributors",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": "Initialize RuleGarden for this repository."
+  },
+  "mcpServers": "./.mcp.json"
+}

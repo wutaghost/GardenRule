@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -28,6 +29,7 @@ from rulegarden.rules.lifecycle import (
 )
 from rulegarden.rules.selector import record_rule_hits, select_rules
 from rulegarden.transactions.service import TransactionService
+from rulegarden.git.isolated_commit import IsolatedCommitManager
 
 
 class ApplicationError(ValueError):
@@ -123,6 +125,7 @@ class RuleGardenApplication:
             task_id=task_id,
         )
         self.repository.append_evidence(event)
+        self._record_rule_event(task_id, rule.id)
         return _rule_view(rule)
 
     def finish_task(self, task_id: str) -> dict[str, Any]:
@@ -131,11 +134,13 @@ class RuleGardenApplication:
         if task is None:
             raise ApplicationError(f"task '{task_id}' does not exist or has already finished")
         try:
+            commit = self._commit_task_changes(task)
             return {
                 "task_id": task.task_id,
                 "finished": True,
                 "selected_rule_ids": task.selected_rule_ids,
                 "touched_paths": task.touched_paths,
+                "commit": commit,
             }
         finally:
             self.repository.delete_task_state(task_id)
@@ -162,6 +167,9 @@ class RuleGardenApplication:
         else:
             updated = transition_rule(current, rule_id, target)
         transaction = self.transactions.apply_rule_update(f"transition:{rule_id}:{target.value}", updated, [rule_id])
+        current_task_id = self.repository.get_current_task_id()
+        if current_task_id is not None:
+            self._record_rule_event(current_task_id, rule_id)
         changed = next(rule for rule in updated.rules if rule.id == rule_id)
         return {**_rule_view(changed), "transaction_id": transaction.transaction_id}
 
@@ -169,6 +177,26 @@ class RuleGardenApplication:
         """Undo the requested transaction after transaction-level concurrency checks."""
         transaction = self.transactions.undo(transaction_id)
         return {"transaction_id": transaction.transaction_id, "operation": transaction.operation, "undone": True}
+
+    def _record_rule_event(self, task_id: str, rule_id: str) -> None:
+        """Associate mutations with the active task so an end-of-task commit is intentional."""
+        task = self.repository.load_task_state(task_id)
+        if task is None or rule_id in task.rule_event_ids:
+            return
+        self.repository.save_task_state(task.model_copy(update={"rule_event_ids": [*task.rule_event_ids, rule_id]}))
+
+    def _commit_task_changes(self, task: TaskState) -> dict[str, Any]:
+        """Attempt the narrow Git commit only after this task changed RuleGarden state."""
+        if not task.rule_event_ids:
+            return {"status": "not_needed"}
+        try:
+            result = IsolatedCommitManager(self.project_root).commit_rulegarden_changes(
+                f"chore(rulegarden): update {len(task.rule_event_ids)} project rule(s)"
+            )
+            return asdict(result)
+        except Exception:
+            # Finishing a task must still clear private runtime data when Git is unavailable.
+            return {"status": "skipped", "reason": "commit_manager_error"}
 
 
 def _rule_view(rule: Rule) -> dict[str, Any]:

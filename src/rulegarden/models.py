@@ -182,6 +182,7 @@ class TaskState(BaseModel):
     expected_paths: list[str] = Field(default_factory=list)
     risk_signals: list[str] = Field(default_factory=list)
     selected_rule_ids: list[str] = Field(default_factory=list)
+    rule_event_ids: list[str] = Field(default_factory=list)
     touched_paths: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=_utc_now)
 

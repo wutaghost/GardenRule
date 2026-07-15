@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "rulegarden": {
+      "command": "rulegarden-mcp"
+    }
+  }
+}

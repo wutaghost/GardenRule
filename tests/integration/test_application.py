@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -77,3 +78,41 @@ def test_transition_compiles_stable_rule_and_undo_reverts_it(tmp_path: Path) -> 
     app.undo()
 
     assert "Inspect existing code first." not in (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+
+
+def test_finish_task_commits_only_rulegarden_changes_when_the_project_is_ready(tmp_path: Path) -> None:
+    app_module = _application_module()
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "RuleGarden Tests"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "tests@example.invalid"], cwd=tmp_path, check=True)
+    app = app_module.RuleGardenApplication(tmp_path)
+    app.initialize()
+    subprocess.run(["git", "add", "AGENTS.md", ".rulegarden/rules.yaml"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "baseline"], cwd=tmp_path, check=True)
+    (tmp_path / "README.md").write_text("unrelated user work\n", encoding="utf-8")
+
+    task = app.begin_task("Add a stable rule.", [], [], [])
+    added = app.record_correction(
+        task["task_id"],
+        "Inspect existing code first.",
+        RuleScope(),
+        "User requested reuse.",
+        [],
+        "normal",
+    )
+    app.transition_rule(added["id"], RuleStatus.STABLE)
+
+    summary = app.finish_task(task["task_id"])
+
+    assert summary["commit"]["status"] == "committed"
+    changed_paths = subprocess.run(
+        ["git", "show", "--pretty=", "--name-only", "HEAD"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    assert changed_paths == [".rulegarden/rules.yaml", "AGENTS.md"]
+    assert "README.md" in subprocess.run(
+        ["git", "status", "--short"], cwd=tmp_path, check=True, capture_output=True, text=True
+    ).stdout
