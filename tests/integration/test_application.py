@@ -80,6 +80,27 @@ def test_transition_compiles_stable_rule_and_undo_reverts_it(tmp_path: Path) -> 
     assert "Inspect existing code first." not in (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
 
 
+def test_transition_to_dynamic_reactivates_a_disabled_rule_at_the_requested_status(tmp_path: Path) -> None:
+    app_module = _application_module()
+    app = app_module.RuleGardenApplication(tmp_path)
+    app.initialize()
+    task = app.begin_task("Add a rule.", [], [], [])
+    added = app.record_correction(
+        task["task_id"],
+        "Inspect existing code first.",
+        RuleScope(),
+        "User requested reuse.",
+        [],
+        "normal",
+    )
+    app.transition_rule(added["id"], RuleStatus.STABLE)
+    app.transition_rule(added["id"], RuleStatus.DISABLED)
+
+    reactivated = app.transition_rule(added["id"], RuleStatus.DYNAMIC)
+
+    assert reactivated["status"] == "dynamic"
+
+
 def test_finish_task_commits_only_rulegarden_changes_when_the_project_is_ready(tmp_path: Path) -> None:
     app_module = _application_module()
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)

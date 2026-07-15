@@ -162,8 +162,14 @@ class RuleGardenApplication:
             updated = disable_rule(current, rule_id)
         elif target is RuleStatus.DELETED:
             updated = delete_rule(current, rule_id)
-        elif target is RuleStatus.DYNAMIC and _rule_status(current, rule_id) is RuleStatus.DISABLED:
-            updated = enable_rule(current, rule_id)
+        elif _rule_status(current, rule_id) is RuleStatus.DISABLED:
+            # Enable restores the stored status first; an explicit target may request a different one.
+            restored = enable_rule(current, rule_id)
+            updated = (
+                restored
+                if _rule_status(restored, rule_id) is target
+                else transition_rule(restored, rule_id, target)
+            )
         else:
             updated = transition_rule(current, rule_id, target)
         transaction = self.transactions.apply_rule_update(f"transition:{rule_id}:{target.value}", updated, [rule_id])
