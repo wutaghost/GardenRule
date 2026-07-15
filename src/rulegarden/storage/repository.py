@@ -12,7 +12,7 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
-from rulegarden.models import EvidenceEvent, RuleDocument, TaskState
+from rulegarden.models import EvidenceEvent, RuleDocument, TaskState, Transaction
 
 
 class StorageError(RuntimeError):
@@ -31,6 +31,7 @@ class RuleRepository:
         self.runtime_dir = self.rulegarden_dir / "runtime"
         self.rules_path = self.rulegarden_dir / "rules.yaml"
         self.evidence_path = self.rulegarden_dir / "evidence.jsonl"
+        self.history_path = self.rulegarden_dir / "history.jsonl"
 
     def initialize_storage(self) -> None:
         """Create the minimal layout without changing any unrelated project file."""
@@ -71,6 +72,28 @@ class RuleRepository:
             handle.write(f"{line}\n")
             handle.flush()
             os.fsync(handle.fileno())
+
+    def append_history(self, transaction: Transaction) -> None:
+        """Append a complete transaction record only after all visible writes succeed."""
+        self.rulegarden_dir.mkdir(parents=True, exist_ok=True)
+        line = json.dumps(transaction.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":"))
+        with self.history_path.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(f"{line}\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    def load_history(self) -> list[Transaction]:
+        """Read the append-only transaction journal, rejecting partial or invalid entries."""
+        if not self.history_path.exists():
+            return []
+        try:
+            return [
+                Transaction.model_validate_json(line)
+                for line in self.history_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+        except (OSError, ValidationError) as error:
+            raise StorageError(f"cannot read {self.history_path}: {error}") from error
 
     def save_task_state(self, state: TaskState) -> None:
         """Persist only transient task metadata under the ignored runtime directory."""
