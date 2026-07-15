@@ -85,6 +85,7 @@ class RuleGardenApplication:
             selected_rule_ids=[rule.id for rule in selected],
         )
         self.repository.save_task_state(task)
+        self.repository.set_current_task(task.task_id)
         return {"task_id": task.task_id, "rules": [_rule_view(rule) for rule in selected]}
 
     def record_correction(
@@ -138,6 +139,7 @@ class RuleGardenApplication:
             }
         finally:
             self.repository.delete_task_state(task_id)
+            self.repository.clear_current_task(task_id)
 
     def list_rules(self, status: RuleStatus | str | None = None) -> dict[str, Any]:
         """List rule summaries without exposing evidence, metrics, or runtime data."""

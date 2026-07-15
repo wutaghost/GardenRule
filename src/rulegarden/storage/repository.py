@@ -32,6 +32,7 @@ class RuleRepository:
         self.rules_path = self.rulegarden_dir / "rules.yaml"
         self.evidence_path = self.rulegarden_dir / "evidence.jsonl"
         self.history_path = self.rulegarden_dir / "history.jsonl"
+        self.state_path = self.rulegarden_dir / "state.json"
 
     def initialize_storage(self) -> None:
         """Create the minimal layout without changing any unrelated project file."""
@@ -117,11 +118,54 @@ class RuleRepository:
         if path.exists():
             path.unlink()
 
+    def set_current_task(self, task_id: str) -> None:
+        """Store the active task identifier without copying prompt content into shared state."""
+        self._state_path(task_id)
+        self._write_project_state({"current_task_id": task_id, "stop_notified": False})
+
+    def get_current_task_id(self) -> str | None:
+        """Return the active task identifier, treating an absent state file as no active task."""
+        current = self._read_project_state().get("current_task_id")
+        if current is None:
+            return None
+        if not isinstance(current, str) or not _IDENTIFIER.fullmatch(current):
+            raise StorageError("current task id is invalid")
+        return current
+
+    def mark_stop_notified(self, task_id: str) -> bool:
+        """Return true once per active task so Stop hooks cannot recurse indefinitely."""
+        state = self._read_project_state()
+        if state.get("current_task_id") != task_id or state.get("stop_notified") is True:
+            return False
+        state["stop_notified"] = True
+        self._write_project_state(state)
+        return True
+
+    def clear_current_task(self, task_id: str) -> None:
+        """Clear the pointer only when the finishing task still owns it."""
+        state = self._read_project_state()
+        if state.get("current_task_id") == task_id:
+            self._atomic_write(self.state_path, "{}")
+
     def _state_path(self, task_id: str) -> Path:
         """Reject path traversal before mapping a task identifier to a file name."""
         if not _IDENTIFIER.fullmatch(task_id):
             raise StorageError("task id is invalid")
         return self.runtime_dir / f"{task_id}.json"
+
+    def _read_project_state(self) -> dict[str, Any]:
+        if not self.state_path.exists():
+            return {}
+        try:
+            state = json.loads(self.state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise StorageError(f"cannot read {self.state_path}: {error}") from error
+        if not isinstance(state, dict):
+            raise StorageError("project state must be a JSON object")
+        return state
+
+    def _write_project_state(self, state: dict[str, Any]) -> None:
+        self._atomic_write(self.state_path, json.dumps(state, ensure_ascii=False, separators=(",", ":")))
 
     @staticmethod
     def _atomic_write(target: Path, contents: str) -> None:
